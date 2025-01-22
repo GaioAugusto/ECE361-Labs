@@ -1,0 +1,13 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "C/C++ Runner: Debug Session",
+      "type": "lldb",
+      "request": "launch",
+      "args": [],
+      "cwd": "/Users/gaioaugusto/Documents/uoft/ThirdYear/ECE361/labs/lab1",
+      "program": "/Users/gaioaugusto/Documents/uoft/ThirdYear/ECE361/labs/lab1/build/Debug/outDebug"
+    }
+  ]
+}
