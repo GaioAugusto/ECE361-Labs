@@ -52,8 +52,7 @@ int main(int argc, char *argv[]) {
     // main loop to receive file
     while (1) {
         // receive packet
-        ssize_t bytes_received = recvfrom(server_socket, buffer, PACKET_BUFFER_SIZE, 0,
-                                          (struct sockaddr *)&sender_addr, &sender_addr_len);
+        ssize_t bytes_received = recvfrom(server_socket, buffer, PACKET_BUFFER_SIZE, 0, (struct sockaddr *)&sender_addr, &sender_addr_len);
         if (bytes_received < 0) {
             perror("recvfrom");
             break;
@@ -64,7 +63,6 @@ int main(int argc, char *argv[]) {
         char filename[128];
         int header_length = 0;
 
-        // format: total_frag:frag_no:size:filename:
         int items = sscanf(buffer, "%u:%u:%u:%127[^:]:%n",
                            &total_frag, &frag_no, &size, filename, &header_length);
         if (items != 4) {
@@ -74,8 +72,7 @@ int main(int argc, char *argv[]) {
             continue;
         }
 
-        printf("Received packet %u/%u (header %d bytes, data size %u bytes)\n",
-               frag_no, total_frag, header_length, size);
+        printf("Received packet %u/%u (header %d bytes, data size %u bytes)\n", frag_no, total_frag, header_length, size);
 
         if (frag_no == 1) {
             strncpy(receivedFileName, filename, sizeof(receivedFileName) - 1);
@@ -106,7 +103,7 @@ int main(int argc, char *argv[]) {
             fclose(outputFile);
             break;
         }
-        printf("Sent ACK for packet %u\n", frag_no);
+        printf("Sent ACK for packet %d\n", frag_no);
 
         if (frag_no == total_frag) {
             printf("File transfer completed. Saved as: %s\n", receivedFileName);

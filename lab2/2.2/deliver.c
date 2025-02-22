@@ -6,6 +6,7 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <time.h>
 
 #define MAX_DATA_SIZE 1000
 #define PACKET_BUFFER_SIZE 1500
@@ -86,13 +87,15 @@ int main(int argc, char *argv[]) { // argc is the # of args, argv are the actual
         num_frags = 1; // if file is empty send one fragment with size = 0
     }
     else{
-        num_frags = (unsigned int)((fileSize + MAX_DATA_SIZE - 1) / MAX_DATA_SIZE);
+        num_frags = (int)((fileSize + MAX_DATA_SIZE - 1) / MAX_DATA_SIZE);
     }
 
     printf("File size: %ld bytes\n", fileSize);
     printf("Number of fragments: %u\n", num_frags);
 
-    char packet_buffer[PACKET_BUFFER_SIZE]; 
+    // Start timer
+    struct timespec start, end;
+    clock_gettime(CLOCK_MONOTONIC, &start);
 
     // Read and send packets
     for (int i = 1; i <= num_frags; i++) { 
@@ -101,9 +104,16 @@ int main(int argc, char *argv[]) { // argc is the # of args, argv are the actual
             close(sockfd);
             return EXIT_FAILURE;
         }
-    }
+    }  
 
     printf("File transfer completed.\n");
+
+    // End timer and measure
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    double rtt = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
+
+    printf("Round-trip time: %.6f seconds\n", rtt);
+
     fclose(fp);
     close(sockfd);
     return 0;
@@ -122,7 +132,7 @@ int send_fragment(int sockfd, FILE *fp, long fileSize, int frag_no, int num_frag
     }
 
     // Create packet header
-    int header_len = snprintf(packet_buffer, PACKET_BUFFER_SIZE, "%u:%u:%u:%s:", num_frags, frag_no, (unsigned int)bytesRead, fileName);
+    int header_len = snprintf(packet_buffer, PACKET_BUFFER_SIZE, "%u:%u:%u:%s:", num_frags, frag_no, (int)bytesRead, fileName);
 
     // error check
     if (header_len < 0 || header_len >= PACKET_BUFFER_SIZE) {
