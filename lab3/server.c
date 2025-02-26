@@ -67,8 +67,7 @@ int main(int argc, char *argv[])
 
         // LOGIC TO DROP PACKETS SOMETIMES
         double number = (double)rand() / RAND_MAX; // number between zero and one
-        printf("Number is %lf\n\n\n\n", number);
-        if (number < 1e-1)
+        if (number < 0.1)                          // 10% change of dropping a packet
         {
             printf("Packet dropped\n");
             continue; // don't send ACK
@@ -94,7 +93,7 @@ int main(int argc, char *argv[])
         if (frag_no == 1)
         {
             strncpy(receivedFileName, filename, sizeof(receivedFileName) - 1);
-            outputFile = fopen(receivedFileName, "wb"); // open create since it's first fragment
+            outputFile = fopen("finishedFile.jpeg", "wb"); // open create since it's first fragment
             if (!outputFile)
             {
                 perror("fopen");
