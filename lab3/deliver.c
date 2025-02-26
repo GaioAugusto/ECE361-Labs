@@ -160,48 +160,74 @@ int main(int argc, char *argv[])
 int send_fragment(int sockfd, FILE *fp, long fileSize, int frag_no, int num_frags,
                   const char *fileName, struct sockaddr_in *serverAddr)
 {
-    char packet_buffer[PACKET_BUFFER_SIZE]; // Buffer to store the full packet
-
+    char packet_buffer[PACKET_BUFFER_SIZE];
     char data[MAX_DATA_SIZE];
     size_t bytesRead = 0;
-    if (fileSize > 0)
+
+    // Calculate how many bytes we should read for this fragment
+    long offset = (frag_no - 1) * MAX_DATA_SIZE; // Starting byte for this fragment
+    long bytesRemaining = fileSize - offset;     // Bytes left in the file from this point
+    size_t bytesToRead = (bytesRemaining > MAX_DATA_SIZE) ? MAX_DATA_SIZE : bytesRemaining;
+
+    if (fileSize > 0 && bytesToRead > 0)
     {
-        bytesRead = fread(data, 1, MAX_DATA_SIZE, fp); // reads 1000 bytes from fp and stores in data
+        // Ensure file pointer is at the correct position
+        if (fseek(fp, offset, SEEK_SET) != 0)
+        {
+            perror("fseek");
+            return -1;
+        }
+
+        bytesRead = fread(data, 1, bytesToRead, fp);
+        if (bytesRead != bytesToRead && !feof(fp))
+        {
+            perror("fread error");
+            return -1;
+        }
         printf("Bytes read %zu\n", bytesRead);
+    }
+    else if (fileSize == 0 && frag_no == 1)
+    {
+        bytesRead = 0; // Empty file case
+    }
+    else
+    {
+        printf("No more data to read for fragment %d\n", frag_no);
+        bytesRead = 0;
     }
 
     // Create packet header
-    int header_len = snprintf(packet_buffer, PACKET_BUFFER_SIZE, "%u:%u:%u:%s:", num_frags, frag_no, (int)bytesRead, fileName);
+    int header_len = snprintf(packet_buffer, PACKET_BUFFER_SIZE, "%u:%u:%u:%s:",
+                              num_frags, frag_no, (int)bytesRead, fileName);
 
-    // error check
     if (header_len < 0 || header_len >= PACKET_BUFFER_SIZE)
     {
+        fprintf(stderr, "Header creation failed\n");
         return -1;
     }
 
     if (header_len + bytesRead > PACKET_BUFFER_SIZE)
     {
+        fprintf(stderr, "Packet size exceeds buffer\n");
         return -1;
     }
 
-    // copy file data into the packet buffer after header
+    // Copy file data into the packet buffer after header
     memcpy(packet_buffer + header_len, data, bytesRead);
 
-    // LOGIC FOR LAB3 starts here
+    // Rest of your retransmission and ACK logic remains unchanged
     bool ackReceived = false;
     bool secondTry = false;
     char ack_buffer[256];
 
-    // Start timer
     struct timespec start, end;
     clock_gettime(CLOCK_MONOTONIC, &start);
 
     while (!ackReceived)
     {
-
-        // send the packet
         ssize_t packetSize = header_len + bytesRead;
-        ssize_t sentBytes = sendto(sockfd, packet_buffer, packetSize, 0, (struct sockaddr *)serverAddr, sizeof(*serverAddr));
+        ssize_t sentBytes = sendto(sockfd, packet_buffer, packetSize, 0,
+                                   (struct sockaddr *)serverAddr, sizeof(*serverAddr));
 
         if (sentBytes < 0)
         {
@@ -215,22 +241,21 @@ int send_fragment(int sockfd, FILE *fp, long fileSize, int frag_no, int num_frag
         }
         else
         {
-            printf("Sent packet %u/%u (header %d bytes, data %zu bytes)\n", frag_no, num_frags, header_len, bytesRead);
+            printf("Sent packet %u/%u (header %d bytes, data %zu bytes)\n",
+                   frag_no, num_frags, header_len, bytesRead);
         }
 
         struct timeval t1;
         t1.tv_sec = (int)timeoutInterval;
         t1.tv_usec = (int)((timeoutInterval - (int)timeoutInterval) * 1e6);
 
-        setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &t1, sizeof(t1)); // this makes recv block only for timeoutinterval seconds
+        setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &t1, sizeof(t1));
 
-        // wait for the ACK
         socklen_t addrLen = sizeof(*serverAddr);
-        memset(&ack_buffer, 0, sizeof(ack_buffer)); // clean garbage
+        memset(&ack_buffer, 0, sizeof(ack_buffer));
         ssize_t ackBytes = recvfrom(sockfd, ack_buffer, sizeof(ack_buffer) - 1, 0,
                                     (struct sockaddr *)serverAddr, &addrLen);
 
-        // if ackBytes < 0 means either error or timeout
         if (ackBytes < 0)
         {
             if (errno == EAGAIN || errno == EWOULDBLOCK)
@@ -247,7 +272,6 @@ int send_fragment(int sockfd, FILE *fp, long fileSize, int frag_no, int num_frag
         ack_buffer[ackBytes] = '\0';
     }
 
-    // End timer
     clock_gettime(CLOCK_MONOTONIC, &end);
     double sampleRTT = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
 
@@ -256,9 +280,9 @@ int send_fragment(int sockfd, FILE *fp, long fileSize, int frag_no, int num_frag
         printf("ACK received for packet %u/%u\n", frag_no, num_frags);
         if (!secondTry)
         {
-            estimatedRTT = (1 - ALFA) * estimatedRTT + ALFA * sampleRTT;          // recalculate estimated RTT
-            devRTT = (1 - BETA) * devRTT + BETA * fabs(sampleRTT - estimatedRTT); // recalculate estimated devRTT (safety margin)
-            timeoutInterval = estimatedRTT + 4 * devRTT;                          // recalculate timeoutInterval
+            estimatedRTT = (1 - ALFA) * estimatedRTT + ALFA * sampleRTT;
+            devRTT = (1 - BETA) * devRTT + BETA * fabs(sampleRTT - estimatedRTT);
+            timeoutInterval = estimatedRTT + 4 * devRTT;
         }
     }
     else
@@ -267,5 +291,5 @@ int send_fragment(int sockfd, FILE *fp, long fileSize, int frag_no, int num_frag
         return -1;
     }
 
-    return 0; // Success
+    return 0;
 }
