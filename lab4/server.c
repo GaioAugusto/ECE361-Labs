@@ -472,55 +472,6 @@ void handle_login(struct message msg, int client_socket)
     send(client_socket, login_return_buffer, strlen(login_return_buffer), 0);
 }
 
-/*
-void handle_login(struct message msg, int client_socket)
-{
-    struct message login_return;
-    // Set values for login return message
-    strncpy((char *)login_return.source, "server", MAX_NAME);
-    login_return.source[MAX_NAME - 1] = '\0';
-
-    // Check if username and password are valid
-    for (int i = 0; i < 4; i++)
-    {
-        // Check if username exists
-        if (strcmp((const char *)msg.source, accounts[i][0]) == 0)
-        {
-            // Check if password is correct
-            if (strcmp((const char *)msg.data, accounts[i][1]) == 0)
-            {
-                login_return.type = LO_ACK;
-                strncpy((char *)login_return.data, "", MAX_DATA);
-                login_return.data[MAX_DATA - 1] = '\0';
-                login_return.size = 0;
-                break;
-            }
-            else
-            {
-                login_return.type = LO_NAK;
-                strncpy((char *)login_return.data, "Incorrect password", MAX_DATA);
-                login_return.data[MAX_DATA - 1] = '\0';
-                login_return.size = sizeof("Incorrect password");
-                break;
-            }
-        }
-        else
-        {
-            login_return.type = LO_NAK;
-            strncpy((char *)login_return.data, "User or client does not exist", MAX_DATA);
-            login_return.data[MAX_DATA - 1] = '\0';
-            login_return.size = sizeof("User or client does not exist");
-            break;
-        }
-    }
-
-    // Serialize and send login return message
-    char login_return_buffer[1024];
-    serialize_message(&login_return, login_return_buffer, sizeof(login_return_buffer));
-    send(client_socket, login_return_buffer, strlen(login_return_buffer), 0);
-}
-    */
-
 struct session *session_check(const char *sessionID)
 {
     struct session *curr = sessions_head;
