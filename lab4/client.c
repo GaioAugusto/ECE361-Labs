@@ -37,7 +37,7 @@ struct message
 int create_socket();
 int connect_to_server(int sockfd, struct sockaddr_in *serverAddr);
 void send_message(int sockfd, const char *message);
-void process_incoming_message(const char *line);
+void receive_message(int sockfd, char *buffer, size_t buffer_size);
 struct message create_message(unsigned int type, const char *source, const char *data);
 void serialize_message(const struct message *msg, char *buffer, size_t buf_size);
 struct message deserialize_message(const char *serialized);
@@ -91,28 +91,20 @@ int main(int argc, char *argv[])
             continue;
         }
 
-        // Create login message, serialize and send it (append '\n' as delimiter)
+        // Create login message, serialize and send it
         struct message loginMsg = create_message(LOGIN, clientID, password);
         char serialized_login[1024];
         serialize_message(&loginMsg, serialized_login, sizeof(serialized_login));
-        strcat(serialized_login, "\n");
         send_message(sockfd, serialized_login);
 
-        // Wait for server response (assume one complete line)
+        // Wait for server response
         char buffer[1024];
-        ssize_t n = recv(sockfd, buffer, sizeof(buffer) - 1, 0);
-        if (n <= 0)
-        {
-            fprintf(stderr, "Error receiving login response.\n");
-            close(sockfd);
-            continue;
-        }
-        buffer[n] = '\0';
+        receive_message(sockfd, buffer, sizeof(buffer));
         struct message login_response = deserialize_message(buffer);
         if (login_response.type == LO_ACK)
         {
             printf("Login successful\n");
-            break; // Exit login loop
+            break; // Exit the login loop
         }
         else if (login_response.type == LO_NAK)
         {
@@ -122,13 +114,17 @@ int main(int argc, char *argv[])
         }
     }
 
-    // Setup select loop with a persistent receive buffer.
+    // Main event loop using select()
     fd_set read_fds;
-    int fdmax = (sockfd > STDIN_FILENO) ? sockfd : STDIN_FILENO;
-    char recv_buffer[8192];
-    size_t recv_len = 0;
-    recv_buffer[0] = '\0';
-
+    int fdmax;
+    if (sockfd > STDIN_FILENO)
+    {
+        fdmax = sockfd;
+    }
+    else
+    {
+        fdmax = STDIN_FILENO;
+    }
     printf("Enter command: ");
     fflush(stdout);
 
@@ -145,11 +141,11 @@ int main(int argc, char *argv[])
             break;
         }
 
-        // Data from server socket:
+        // If there is data from the server socket:
         if (FD_ISSET(sockfd, &read_fds))
         {
-            char temp_buffer[2048];
-            ssize_t bytes = recv(sockfd, temp_buffer, sizeof(temp_buffer) - 1, 0);
+            char recv_buffer[2048];
+            ssize_t bytes = recv(sockfd, recv_buffer, sizeof(recv_buffer) - 1, 0);
             if (bytes <= 0)
             {
                 if (bytes == 0)
@@ -158,39 +154,27 @@ int main(int argc, char *argv[])
                     perror("recv");
                 break;
             }
-            temp_buffer[bytes] = '\0';
-
-            // Append received data to our persistent buffer.
-            if (recv_len + bytes < sizeof(recv_buffer) - 1)
-            {
-                memcpy(recv_buffer + recv_len, temp_buffer, bytes + 1);
-                recv_len += bytes;
-            }
+            recv_buffer[bytes] = '\0';
+            struct message msg = deserialize_message(recv_buffer);
+            // Process based on message type
+            if (msg.type == MESSAGE)
+                printf("\n[Message from %s]: %s\n", msg.source, msg.data);
+            else if (msg.type == JN_ACK)
+                printf("\nJoined session: %s\n", msg.data);
+            else if (msg.type == JN_NAK)
+                printf("\nFailed to join session: %s\n", msg.data);
+            else if (msg.type == NS_ACK)
+                printf("\nCreated session: %s\n", msg.data);
+            else if (msg.type == QU_ACK)
+                printf("\nQuery response: %s\n", msg.data);
             else
-            {
-                fprintf(stderr, "Receive buffer overflow\n");
-                recv_len = 0;
-                recv_buffer[0] = '\0';
-            }
-            // Process complete lines (each message ends with '\n').
-            char *line_start = recv_buffer;
-            char *newline_ptr;
-            while ((newline_ptr = strchr(line_start, '\n')) != NULL)
-            {
-                *newline_ptr = '\0'; // Terminate the line.
-                if (strlen(line_start) > 0)
-                {
-                    process_incoming_message(line_start);
-                }
-                line_start = newline_ptr + 1;
-            }
-            // Move any leftover (partial) message to the start of recv_buffer.
-            size_t remaining = strlen(line_start);
-            memmove(recv_buffer, line_start, remaining + 1);
-            recv_len = remaining;
+                printf("\n[Server]: %s\n", msg.data);
+
+            printf("Enter command: ");
+            fflush(stdout);
         }
 
-        // Data from standard input:
+        // If there is data from standard input:
         if (FD_ISSET(STDIN_FILENO, &read_fds))
         {
             char input_buffer[2048];
@@ -201,13 +185,12 @@ int main(int argc, char *argv[])
             }
             input_buffer[strcspn(input_buffer, "\n")] = '\0';
 
-            // Process local commands and send messages (append '\n' as delimiter).
+            // Process commands
             if (strcmp(input_buffer, "/logout") == 0)
             {
                 struct message logout = create_message(EXIT, clientID, "");
                 char serialized_logout[2048];
                 serialize_message(&logout, serialized_logout, sizeof(serialized_logout));
-                strcat(serialized_logout, "\n");
                 send_message(sockfd, serialized_logout);
                 printf("Logged out successfully\n");
                 break;
@@ -217,7 +200,6 @@ int main(int argc, char *argv[])
                 struct message response = create_message(LEAVE_SESS, clientID, "");
                 char serialized[1024];
                 serialize_message(&response, serialized, sizeof(serialized));
-                strcat(serialized, "\n");
                 send_message(sockfd, serialized);
                 printf("Left session\n");
             }
@@ -228,7 +210,6 @@ int main(int argc, char *argv[])
                 struct message response = create_message(JOIN, clientID, sessionID);
                 char serialized[1024];
                 serialize_message(&response, serialized, sizeof(serialized));
-                strcat(serialized, "\n");
                 send_message(sockfd, serialized);
             }
             else if (strncmp(input_buffer, "/createsession ", 15) == 0)
@@ -238,7 +219,6 @@ int main(int argc, char *argv[])
                 struct message response = create_message(NEW_SESS, clientID, sessionID);
                 char serialized[1024];
                 serialize_message(&response, serialized, sizeof(serialized));
-                strcat(serialized, "\n");
                 send_message(sockfd, serialized);
             }
             else if (strcmp(input_buffer, "/list") == 0)
@@ -246,7 +226,6 @@ int main(int argc, char *argv[])
                 struct message response = create_message(QUERY, clientID, "");
                 char serialized[1024];
                 serialize_message(&response, serialized, sizeof(serialized));
-                strcat(serialized, "\n");
                 send_message(sockfd, serialized);
             }
             else if (strcmp(input_buffer, "/quit") == 0)
@@ -256,11 +235,10 @@ int main(int argc, char *argv[])
             }
             else
             {
-                // Regular chat message.
+                // Regular chat message
                 struct message response = create_message(MESSAGE, clientID, input_buffer);
                 char serialized[2048];
                 serialize_message(&response, serialized, sizeof(serialized));
-                strcat(serialized, "\n");
                 send_message(sockfd, serialized);
             }
             printf("Enter command: ");
@@ -303,23 +281,16 @@ void send_message(int sockfd, const char *message)
     }
 }
 
-void process_incoming_message(const char *line)
+void receive_message(int sockfd, char *buffer, size_t buffer_size)
 {
-    struct message msg = deserialize_message(line);
-    if (msg.type == MESSAGE)
-        printf("\n[Message from %s]: %s\n", msg.source, msg.data);
-    else if (msg.type == JN_ACK)
-        printf("\nJoined session: %s\n", msg.data);
-    else if (msg.type == JN_NAK)
-        printf("\nFailed to join session: %s\n", msg.data);
-    else if (msg.type == NS_ACK)
-        printf("\nCreated session: %s\n", msg.data);
-    else if (msg.type == QU_ACK)
-        printf("\nQuery response: %s\n", msg.data);
-    else
-        printf("\n[Server]: %s\n", msg.data);
-    printf("Enter command: ");
-    fflush(stdout);
+    memset(buffer, 0, buffer_size);
+    ssize_t bytesRecv = recv(sockfd, buffer, buffer_size - 1, 0);
+    if (bytesRecv < 0)
+    {
+        perror("recv");
+    }
+    buffer[bytesRecv] = '\0';
+    printf("Server: %s\n", buffer);
 }
 
 struct message create_message(unsigned int type, const char *source, const char *data)
@@ -342,14 +313,18 @@ void serialize_message(const struct message *msg, char *buffer, size_t buf_size)
 struct message deserialize_message(const char *serialized)
 {
     struct message msg;
-    memset(&msg, 0, sizeof(struct message));
+    memset(&msg, 0, sizeof(struct message)); // Initialize all fields to zero
+
     if (!serialized || strlen(serialized) == 0)
     {
         fprintf(stderr, "Error: Empty or NULL serialized message.\n");
         return msg;
     }
+
     char type_str[20] = {0};
     char size_str[20] = {0};
+
+    // Find the first colon to extract type
     char *first_colon = strchr(serialized, ':');
     if (!first_colon)
     {
@@ -363,6 +338,8 @@ struct message deserialize_message(const char *serialized)
         type_str[type_len] = '\0';
         msg.type = atoi(type_str);
     }
+
+    // Find the second colon to extract size
     char *second_colon = strchr(first_colon + 1, ':');
     if (!second_colon)
     {
@@ -376,6 +353,8 @@ struct message deserialize_message(const char *serialized)
         size_str[size_len] = '\0';
         msg.size = atoi(size_str);
     }
+
+    // Find the third colon to extract source
     char *third_colon = strchr(second_colon + 1, ':');
     if (!third_colon)
     {
@@ -388,6 +367,8 @@ struct message deserialize_message(const char *serialized)
         strncpy((char *)msg.source, second_colon + 1, source_len);
         msg.source[source_len] = '\0';
     }
+
+    // The remainder is the data
     char *data_start = third_colon + 1;
     if (data_start && *data_start)
     {

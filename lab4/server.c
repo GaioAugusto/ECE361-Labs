@@ -184,8 +184,7 @@ int main(int argc, char *argv[])
                         add_client(new_client);
                     }
                 }
-                // existing client is sending a message
-                // existing client is sending a message
+
                 else
                 {
                     int n = recv(i, buffer, sizeof(buffer) - 1, 0);
@@ -665,7 +664,7 @@ void handle_query(struct message msg, int client_socket)
 
 void handle_message(struct message msg, int client_socket)
 {
-    // find which client sent message
+    // Find the sender
     struct client_info *sender = clients_head;
     while (sender)
     {
@@ -676,25 +675,34 @@ void handle_message(struct message msg, int client_socket)
         sender = sender->next;
     }
 
-    // check senders session
+    // Check sender's session
     struct session *curr_sess = sender->current_session;
-    // Only sender is in session
-    if (curr_sess->participants->next_participant == NULL)
+    if (curr_sess == NULL || curr_sess->participants == NULL)
+    {
+        // Sender is not in a session
+        return;
+    }
+
+    // If only the sender is in the session, no need to forward
+    if (curr_sess->participants->next_participant == NULL && curr_sess->participants == sender)
     {
         return;
     }
 
+    // Create the message to forward
     struct message return_message;
     return_message.type = MESSAGE;
     strncpy((char *)return_message.source, sender->clientID, MAX_NAME);
     return_message.source[MAX_NAME - 1] = '\0';
+    strncpy((char *)return_message.data, (char *)msg.data, MAX_DATA);
+    return_message.data[MAX_DATA - 1] = '\0';
+    return_message.size = strlen((char *)return_message.data);
 
-    // Send message to all in session
+    // Serialize the message
     char message_serialized[2048];
-    strncpy(message_serialized, (char *)msg.data, sizeof(message_serialized));
     serialize_message(&return_message, message_serialized, sizeof(message_serialized));
-    return_message.size = sizeof(return_message.data);
 
+    // Send to all other clients in the session
     struct client_info *curr_client = curr_sess->participants;
     while (curr_client)
     {
