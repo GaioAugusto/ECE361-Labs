@@ -22,6 +22,9 @@
 #define MESSAGE 11
 #define QUERY 12
 #define QU_ACK 13
+#define REGISTER 14
+#define REG_ACK 15
+#define REG_NAK 16
 
 #define MAX_NAME 100
 #define MAX_DATA 1024
@@ -77,9 +80,32 @@ void handle_leave(struct message msg, int client_socket);
 void handle_new_session(struct message msg, int client_socket);
 void handle_query(struct message msg, int client_socket);
 void handle_message(struct message msg, int client_socket);
+int register_user(const char *username, const char *password);
+int verify_login(const char *username, const char *password);
 
 int main(int argc, char *argv[])
 {
+    FILE *fp = fopen("accounts.txt", "r");
+    if (fp == NULL)
+    {
+        // File doesn't exist; create it and write pre-existing accounts.
+        fp = fopen("accounts.txt", "w");
+        if (fp == NULL)
+        {
+            perror("Could not create accounts file");
+            exit(EXIT_FAILURE);
+        }
+        fprintf(fp, "client1 password1\n");
+        fprintf(fp, "client2 password2\n");
+        fprintf(fp, "client3 password3\n");
+        fprintf(fp, "client4 password4\n");
+        fclose(fp);
+    }
+    else
+    {
+        fclose(fp);
+    }
+
     // From Beej's guide 7.3
     fd_set master;
     fd_set read_fds;
@@ -230,6 +256,30 @@ int main(int argc, char *argv[])
                         // Process message based on type
                         switch (msg.type)
                         {
+                        case REGISTER:
+                        {
+                            int res = register_user((char *)msg.source, (char *)msg.data);
+                            struct message reg_return;
+                            strncpy((char *)reg_return.source, "server", MAX_NAME);
+                            reg_return.source[MAX_NAME - 1] = '\0';
+                            if (res == 0)
+                            {
+                                reg_return.type = REG_ACK;
+                                strncpy((char *)reg_return.data, "Registration successful", MAX_DATA);
+                            }
+                            else
+                            {
+                                reg_return.type = REG_NAK;
+                                strncpy((char *)reg_return.data, "Registration failed: username exists or error", MAX_DATA);
+                            }
+                            reg_return.data[MAX_DATA - 1] = '\0';
+                            reg_return.size = strlen((char *)reg_return.data);
+
+                            char reg_return_buffer[1024];
+                            serialize_message(&reg_return, reg_return_buffer, sizeof(reg_return_buffer));
+                            send(client_socket, reg_return_buffer, strlen(reg_return_buffer), 0);
+                            break;
+                        }
                         case LOGIN:
                         {
                             // Update client info and handle login
@@ -419,50 +469,29 @@ void add_client(struct client_info *new_client)
 void handle_login(struct message msg, int client_socket)
 {
     struct message login_return;
-    // Set values for login return message
+    // Set source field to server
     strncpy((char *)login_return.source, "server", MAX_NAME);
     login_return.source[MAX_NAME - 1] = '\0';
 
-    // Default to failure
+    // Default failure message
     login_return.type = LO_NAK;
     strncpy((char *)login_return.data, "User or password incorrect", MAX_DATA);
     login_return.data[MAX_DATA - 1] = '\0';
     login_return.size = strlen((char *)login_return.data);
 
-    bool found = false;
-
-    // Check if username and password are valid
-    for (int i = 0; i < 4; i++)
+    // Use the txt verification
+    if (verify_login((char *)msg.source, (char *)msg.data) == 0)
     {
-        printf("Checking account %s against %s\n", (char *)msg.source, accounts[i][0]);
-        // Check if username exists
-        if (strcmp((char *)msg.source, accounts[i][0]) == 0)
-        {
-            found = true;
-            // Check if password is correct
-            if (strcmp((char *)msg.data, accounts[i][1]) == 0)
-            {
-                login_return.type = LO_ACK;
-                strncpy((char *)login_return.data, "Login successful", MAX_DATA);
-                login_return.data[MAX_DATA - 1] = '\0';
-                login_return.size = strlen((char *)login_return.data);
-                printf("Login successful for %s\n", (char *)msg.source);
-            }
-            else
-            {
-                login_return.type = LO_NAK;
-                strncpy((char *)login_return.data, "Incorrect password", MAX_DATA);
-                login_return.data[MAX_DATA - 1] = '\0';
-                login_return.size = strlen((char *)login_return.data);
-                printf("Incorrect password for %s\n", (char *)msg.source);
-            }
-            break; // Found the username, no need to check further
-        }
+        // Login successful
+        login_return.type = LO_ACK;
+        strncpy((char *)login_return.data, "Login successful", MAX_DATA);
+        login_return.data[MAX_DATA - 1] = '\0';
+        login_return.size = strlen((char *)login_return.data);
+        printf("Login successful for %s\n", (char *)msg.source);
     }
-
-    if (!found)
+    else
     {
-        printf("User %s not found\n", (char *)msg.source);
+        printf("Login failed for %s\n", (char *)msg.source);
     }
 
     // Serialize and send login return message
@@ -471,55 +500,6 @@ void handle_login(struct message msg, int client_socket)
     printf("Sending response to socket %d: %s\n", client_socket, login_return_buffer);
     send(client_socket, login_return_buffer, strlen(login_return_buffer), 0);
 }
-
-/*
-void handle_login(struct message msg, int client_socket)
-{
-    struct message login_return;
-    // Set values for login return message
-    strncpy((char *)login_return.source, "server", MAX_NAME);
-    login_return.source[MAX_NAME - 1] = '\0';
-
-    // Check if username and password are valid
-    for (int i = 0; i < 4; i++)
-    {
-        // Check if username exists
-        if (strcmp((const char *)msg.source, accounts[i][0]) == 0)
-        {
-            // Check if password is correct
-            if (strcmp((const char *)msg.data, accounts[i][1]) == 0)
-            {
-                login_return.type = LO_ACK;
-                strncpy((char *)login_return.data, "", MAX_DATA);
-                login_return.data[MAX_DATA - 1] = '\0';
-                login_return.size = 0;
-                break;
-            }
-            else
-            {
-                login_return.type = LO_NAK;
-                strncpy((char *)login_return.data, "Incorrect password", MAX_DATA);
-                login_return.data[MAX_DATA - 1] = '\0';
-                login_return.size = sizeof("Incorrect password");
-                break;
-            }
-        }
-        else
-        {
-            login_return.type = LO_NAK;
-            strncpy((char *)login_return.data, "User or client does not exist", MAX_DATA);
-            login_return.data[MAX_DATA - 1] = '\0';
-            login_return.size = sizeof("User or client does not exist");
-            break;
-        }
-    }
-
-    // Serialize and send login return message
-    char login_return_buffer[1024];
-    serialize_message(&login_return, login_return_buffer, sizeof(login_return_buffer));
-    send(client_socket, login_return_buffer, strlen(login_return_buffer), 0);
-}
-    */
 
 struct session *session_check(const char *sessionID)
 {
@@ -713,7 +693,6 @@ void handle_query(struct message msg, int client_socket)
 
 void handle_message(struct message msg, int client_socket)
 {
-    // Find the sender
     struct client_info *sender = clients_head;
     while (sender)
     {
@@ -724,21 +703,17 @@ void handle_message(struct message msg, int client_socket)
         sender = sender->next;
     }
 
-    // Check sender's session
     struct session *curr_sess = sender->current_session;
     if (curr_sess == NULL || curr_sess->participants == NULL)
     {
-        // Sender is not in a session
         return;
     }
 
-    // If only the sender is in the session, no need to forward
     if (curr_sess->participants->next_participant == NULL && curr_sess->participants == sender)
     {
         return;
     }
 
-    // Create the message to forward
     struct message return_message;
     return_message.type = MESSAGE;
     strncpy((char *)return_message.source, sender->clientID, MAX_NAME);
@@ -761,4 +736,62 @@ void handle_message(struct message msg, int client_socket)
         }
         curr_client = curr_client->next_participant;
     }
+}
+
+int register_user(const char *username, const char *password)
+{
+    // a+ gives us reading/appending permission
+    FILE *filePosition = fopen("accounts.txt", "a+");
+    if (filePosition == NULL)
+    {
+        perror("Failed to open file\n");
+        return -1;
+    }
+
+    rewind(filePosition);
+    char line[256];
+    while (fgets(line, sizeof(line), filePosition) != NULL)
+    {
+        char file_user[128], file_password[128];
+        if (sscanf(line, "%127s %127s", file_user, file_password) == 2)
+        {
+            // Check if username already exists
+            if (strcmp(username, file_user) == 0)
+            {
+                fclose(filePosition);
+                return -1;
+            }
+        }
+    }
+
+    // Append the new account.
+    fprintf(filePosition, "%s %s\n", username, password);
+    fclose(filePosition);
+    return 0; // success
+}
+
+int verify_login(const char *username, const char *password)
+{
+    FILE *fp = fopen("accounts.txt", "r");
+    if (!fp)
+    {
+        perror("fopen");
+        return -1;
+    }
+    char line[256];
+    while (fgets(line, sizeof(line), fp) != NULL)
+    {
+        char file_user[128], file_pass[128];
+        if (sscanf(line, "%127s %127s", file_user, file_pass) == 2)
+        {
+            if (strcmp(username, file_user) == 0 &&
+                strcmp(password, file_pass) == 0)
+            {
+                fclose(fp);
+                return 0;
+            }
+        }
+    }
+    fclose(fp);
+    return -1;
 }
