@@ -466,66 +466,10 @@ void add_client(struct client_info *new_client)
     clients_head = new_client;
 }
 
-// void handle_login(struct message msg, int client_socket)
-// {
-//     struct message login_return;
-//     // Set values for login return message
-//     strncpy((char *)login_return.source, "server", MAX_NAME);
-//     login_return.source[MAX_NAME - 1] = '\0';
-
-//     // Default to failure
-//     login_return.type = LO_NAK;
-//     strncpy((char *)login_return.data, "User or password incorrect", MAX_DATA);
-//     login_return.data[MAX_DATA - 1] = '\0';
-//     login_return.size = strlen((char *)login_return.data);
-
-//     bool found = false;
-
-//     // Check if username and password are valid
-//     for (int i = 0; i < 4; i++)
-//     {
-//         printf("Checking account %s against %s\n", (char *)msg.source, accounts[i][0]);
-//         // Check if username exists
-//         if (strcmp((char *)msg.source, accounts[i][0]) == 0)
-//         {
-//             found = true;
-//             // Check if password is correct
-//             if (strcmp((char *)msg.data, accounts[i][1]) == 0)
-//             {
-//                 login_return.type = LO_ACK;
-//                 strncpy((char *)login_return.data, "Login successful", MAX_DATA);
-//                 login_return.data[MAX_DATA - 1] = '\0';
-//                 login_return.size = strlen((char *)login_return.data);
-//                 printf("Login successful for %s\n", (char *)msg.source);
-//             }
-//             else
-//             {
-//                 login_return.type = LO_NAK;
-//                 strncpy((char *)login_return.data, "Incorrect password", MAX_DATA);
-//                 login_return.data[MAX_DATA - 1] = '\0';
-//                 login_return.size = strlen((char *)login_return.data);
-//                 printf("Incorrect password for %s\n", (char *)msg.source);
-//             }
-//             break; // Found the username, no need to check further
-//         }
-//     }
-
-//     if (!found)
-//     {
-//         printf("User %s not found\n", (char *)msg.source);
-//     }
-
-//     // Serialize and send login return message
-//     char login_return_buffer[1024];
-//     serialize_message(&login_return, login_return_buffer, sizeof(login_return_buffer));
-//     printf("Sending response to socket %d: %s\n", client_socket, login_return_buffer);
-//     send(client_socket, login_return_buffer, strlen(login_return_buffer), 0);
-// }
-
 void handle_login(struct message msg, int client_socket)
 {
     struct message login_return;
-    // Set the source field to "server"
+    // Set source field to server
     strncpy((char *)login_return.source, "server", MAX_NAME);
     login_return.source[MAX_NAME - 1] = '\0';
 
@@ -535,7 +479,7 @@ void handle_login(struct message msg, int client_socket)
     login_return.data[MAX_DATA - 1] = '\0';
     login_return.size = strlen((char *)login_return.data);
 
-    // Use the file-based verification
+    // Use the txt verification
     if (verify_login((char *)msg.source, (char *)msg.data) == 0)
     {
         // Login successful
@@ -749,7 +693,6 @@ void handle_query(struct message msg, int client_socket)
 
 void handle_message(struct message msg, int client_socket)
 {
-    // Find the sender
     struct client_info *sender = clients_head;
     while (sender)
     {
@@ -760,21 +703,17 @@ void handle_message(struct message msg, int client_socket)
         sender = sender->next;
     }
 
-    // Check sender's session
     struct session *curr_sess = sender->current_session;
     if (curr_sess == NULL || curr_sess->participants == NULL)
     {
-        // Sender is not in a session
         return;
     }
 
-    // If only the sender is in the session, no need to forward
     if (curr_sess->participants->next_participant == NULL && curr_sess->participants == sender)
     {
         return;
     }
 
-    // Create the message to forward
     struct message return_message;
     return_message.type = MESSAGE;
     strncpy((char *)return_message.source, sender->clientID, MAX_NAME);

@@ -41,8 +41,8 @@ int create_socket();
 int connect_to_server(int sockfd, struct sockaddr_in *serverAddr);
 void send_message(int sockfd, const char *message);
 void receive_message(int sockfd, char *buffer, size_t buffer_size);
-struct message create_message(unsigned int type, const char *source, const char *data);
 void serialize_message(const struct message *msg, char *buffer, size_t buf_size);
+struct message create_message(unsigned int type, const char *source, const char *data);
 struct message deserialize_message(const char *serialized);
 
 int main(int argc, char *argv[])
@@ -57,7 +57,7 @@ int main(int argc, char *argv[])
     {
         printf("Please enter your command in the format:\n"
                "/login <clientID> <password> <serverIP> <server-port>\n"
-               "or /register <clientID> <password>\n");
+               "or /register <clientID> <password> <serverIP> <server-port>\n");
 
         char userInput[128];
         if (!fgets(userInput, sizeof(userInput), stdin))
@@ -69,7 +69,6 @@ int main(int argc, char *argv[])
 
         if (strncmp(userInput, "/register", 9) == 0)
         {
-            // Expected format: /register <clientID> <password> <serverIP> <server-port> # THIS IS WRONG SO I WILL TRY TO FIX THIS
             if (sscanf(userInput, "%s %s %s %s %d",
                        command, clientID, password, serverIp, &serverPort) != 5)
             {
@@ -78,7 +77,7 @@ int main(int argc, char *argv[])
                 continue;
             }
 
-            // Set up server address structure (same as for login)
+            // Set up server address structure
             struct sockaddr_in serverAddr;
             memset(&serverAddr, 0, sizeof(serverAddr));
             serverAddr.sin_family = AF_INET;
@@ -116,9 +115,9 @@ int main(int argc, char *argv[])
                 printf("Registration failed: %s\n", reg_response.data);
             }
 
-            // Close the socket after registration (if your protocol requires a new connection for login)
+            // Close the socket after registration
             close(sockfd);
-            continue; // Go back to the input loop
+            continue;
         }
         else if (strncmp(userInput, "/login", 6) == 0)
         {
@@ -231,7 +230,7 @@ int main(int argc, char *argv[])
             fflush(stdout);
         }
 
-        // If there is data from standard input:
+        // If there is data from standard input
         if (FD_ISSET(STDIN_FILENO, &read_fds))
         {
             char input_buffer[2048];
@@ -350,6 +349,11 @@ void receive_message(int sockfd, char *buffer, size_t buffer_size)
     printf("Server: %s\n", buffer);
 }
 
+void serialize_message(const struct message *msg, char *buffer, size_t buf_size)
+{
+    snprintf(buffer, buf_size, "%u:%u:%s:%s", msg->type, msg->size, msg->source, msg->data);
+}
+
 struct message create_message(unsigned int type, const char *source, const char *data)
 {
     struct message msg;
@@ -360,11 +364,6 @@ struct message create_message(unsigned int type, const char *source, const char 
     strncpy((char *)msg.data, data, MAX_DATA);
     msg.data[MAX_DATA - 1] = '\0';
     return msg;
-}
-
-void serialize_message(const struct message *msg, char *buffer, size_t buf_size)
-{
-    snprintf(buffer, buf_size, "%u:%u:%s:%s", msg->type, msg->size, msg->source, msg->data);
 }
 
 struct message deserialize_message(const char *serialized)
