@@ -8,15 +8,17 @@
 #include <netinet/in.h>
 #include <netdb.h>
 
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[])
+{
     // check arguments
-    if(argc != 2){
+    if (argc != 2)
+    {
         printf("[Error] Not enough or too many arguments.\n");
         return (EXIT_FAILURE);
     }
 
     // Read the UDP port from input
-    char* port = argv[1];
+    char *port = argv[1];
 
     // Code from Beej's guide page 83 and 84
     struct addrinfo hints;
@@ -38,17 +40,20 @@ int main(int argc, char* argv[]) {
     socklen_t sender_address_size = sizeof(sender_address);
     char buffer[100];
 
-    int n = recvfrom(server_socket, buffer, 100, 0, (struct sockaddr *) &sender_address, &sender_address_size);
+    int n = recvfrom(server_socket, buffer, 100, 0, (struct sockaddr *)&sender_address, &sender_address_size);
 
     // null terminate buffer
     buffer[n] = '\0';
 
     // if ftp send yes
-    if (strcmp(buffer, "ftp") == 0) {
-        sendto(server_socket, "yes", strlen("yes"), 0, (struct sockaddr *) &sender_address, sender_address_size);
+    if (strcmp(buffer, "ftp") == 0)
+    {
+        sendto(server_socket, "yes", strlen("yes"), 0, (struct sockaddr *)&sender_address, sender_address_size);
         printf("yes\n");
-    } else {
-        sendto(server_socket, "no", strlen("no"), 0, (struct sockaddr *) &sender_address, sender_address_size);
+    }
+    else
+    {
+        sendto(server_socket, "no", strlen("no"), 0, (struct sockaddr *)&sender_address, sender_address_size);
         printf("no");
     }
 
