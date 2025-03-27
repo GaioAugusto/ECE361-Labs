@@ -25,6 +25,7 @@
 #define REGISTER 14
 #define REG_ACK 15
 #define REG_NAK 16
+#define PRIVATE_MESSAGE 17
 
 #define MAX_NAME 100
 #define MAX_DATA 2048
@@ -121,6 +122,14 @@ int main(int argc, char *argv[])
         }
         else if (strncmp(userInput, "/login", 6) == 0)
         {
+            if (sscanf(userInput, "%s %s %s %s %d",
+                       command, clientID, password, serverIp, &serverPort) != 5)
+            {
+                fprintf(stderr, "Invalid command. Expected format:\n"
+                                "/login <clientID> <password> <serverIP> <server-port>\n");
+                continue;
+            }
+
             // Set up server address structure
             struct sockaddr_in serverAddr;
             memset(&serverAddr, 0, sizeof(serverAddr));
@@ -197,7 +206,7 @@ int main(int argc, char *argv[])
             break;
         }
 
-        // If there is data from the server socket:
+        // If there is data from the server socket
         if (FD_ISSET(sockfd, &read_fds))
         {
             char recv_buffer[2048];
@@ -223,6 +232,8 @@ int main(int argc, char *argv[])
                 printf("\nCreated session: %s\n", msg.data);
             else if (msg.type == QU_ACK)
                 printf("\nQuery response: %s\n", msg.data);
+            else if (msg.type == PRIVATE_MESSAGE)
+                printf("\n[Private message from %s]: %s\n", msg.source, msg.data);
             else
                 printf("\n[Server]: %s\n", msg.data);
 
@@ -249,7 +260,7 @@ int main(int argc, char *argv[])
                 serialize_message(&logout, serialized_logout, sizeof(serialized_logout));
                 send_message(sockfd, serialized_logout);
                 printf("Logged out successfully\n");
-                break;
+                continue;
             }
             else if (strcmp(input_buffer, "/leavesession") == 0)
             {
@@ -289,6 +300,31 @@ int main(int argc, char *argv[])
                 printf("Quitting\n");
                 break;
             }
+            else if (strncmp(input_buffer, "/pm ", 4) == 0)
+            {
+                char *targetID = input_buffer + 4;           // Skip "/pm "
+                char *message_start = strchr(targetID, ' '); // Find the next space
+                if (!message_start)
+                {
+                    printf("Invalid /pm format. Use: /pm <targetID> <message>\n");
+                    printf("Enter command: ");
+                    fflush(stdout);
+                    continue;
+                }
+                *message_start = '\0'; // Null-terminate targetID
+                message_start++;       // Move to the start of the message
+
+                char pm_data[MAX_DATA];
+                snprintf(pm_data, sizeof(pm_data), "%s\\ %s", targetID, message_start); // Format as "targetID\ message"
+                struct message response = create_message(PRIVATE_MESSAGE, clientID, pm_data);
+                char serialized[2048];
+                serialize_message(&response, serialized, sizeof(serialized));
+                send_message(sockfd, serialized);
+                printf("PM sent to %s: %s\n", targetID, message_start);
+                printf("Enter command: ");
+                fflush(stdout);
+            }
+
             else
             {
                 // Regular chat message
@@ -432,4 +468,3 @@ struct message deserialize_message(const char *serialized)
         msg.data[MAX_DATA - 1] = '\0';
     }
     return msg;
-}

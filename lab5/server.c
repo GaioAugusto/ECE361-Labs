@@ -25,6 +25,7 @@
 #define REGISTER 14
 #define REG_ACK 15
 #define REG_NAK 16
+#define PRIVATE_MESSAGE 17
 
 #define MAX_NAME 100
 #define MAX_DATA 1024
@@ -67,14 +68,14 @@ char accounts[4][2][50] = {
     {"client3", "password3"},
     {"client4", "password4"}};
 
-// Helper functions
-void freeMemory(char **words);
+// Function prototypes
 void serialize_message(const struct message *msg, char *buffer, size_t buf_size);
 void send_message(int sockfd, const char *message);
 struct message deserialize_message(const char *serialized);
 void add_client(struct client_info *new_client);
 void handle_login(struct message msg, int client_socket);
 struct session *session_check(const char *sessionID);
+void add_to_session(struct session *sess, struct client_info *client);
 void handle_join(struct message msg, int client_socket);
 void handle_leave(struct message msg, int client_socket);
 void handle_new_session(struct message msg, int client_socket);
@@ -82,13 +83,14 @@ void handle_query(struct message msg, int client_socket);
 void handle_message(struct message msg, int client_socket);
 int register_user(const char *username, const char *password);
 int verify_login(const char *username, const char *password);
+void handle_private_message(struct message msg, int client_socket);
 
 int main(int argc, char *argv[])
 {
     FILE *fp = fopen("accounts.txt", "r");
     if (fp == NULL)
     {
-        // File doesn't exist; create it and write pre-existing accounts.
+        // File doesn't exist
         fp = fopen("accounts.txt", "w");
         if (fp == NULL)
         {
@@ -113,7 +115,7 @@ int main(int argc, char *argv[])
     int client_socket;
     char buffer[1024];
 
-    // check arguments
+    // Check arguments
     if (argc != 2)
     {
         printf("Error: Wrong number of parameters.\n");
@@ -186,7 +188,7 @@ int main(int argc, char *argv[])
             {
                 if (i == server_socket)
                 {
-                    // new client it trying to join
+                    // New client is trying to join
                     struct sockaddr_storage client_address;
                     socklen_t client_address_size = sizeof(client_address);
                     client_socket = accept(server_socket, (struct sockaddr *)&client_address, &client_address_size);
@@ -201,7 +203,7 @@ int main(int argc, char *argv[])
                         {
                             fdmax = client_socket;
                         }
-                        // create new client_info struct
+                        // Create new client_info struct
                         struct client_info *new_client = malloc(sizeof(struct client_info));
                         new_client->sockfd = client_socket;
                         strcpy(new_client->clientID, "unknown"); // login not yet processed
@@ -210,8 +212,6 @@ int main(int argc, char *argv[])
                         add_client(new_client);
                     }
                 }
-                // existing client is sending a message
-                // existing client is sending a message
                 else
                 {
                     int n = recv(i, buffer, sizeof(buffer) - 1, 0);
@@ -316,37 +316,36 @@ int main(int argc, char *argv[])
                             FD_CLR(i, &master);
                             break;
                         }
-
                         case JOIN:
                         {
                             // Join client to a session
                             handle_join(msg, i);
                             break;
                         }
-
                         case LEAVE_SESS:
                         {
-                            // Note: if a session is empty should it be deleled?
                             // Remove client from session
                             handle_leave(msg, i);
                             break;
                         }
-
                         case NEW_SESS:
                         {
                             handle_new_session(msg, i);
                             break;
                         }
-
                         case QUERY:
                         {
                             handle_query(msg, i);
                             break;
                         }
-
                         case MESSAGE:
                         {
                             handle_message(msg, i);
+                            break;
+                        }
+                        case PRIVATE_MESSAGE:
+                        {
+                            handle_private_message(msg, i);
                             break;
                         }
                         }
@@ -355,18 +354,7 @@ int main(int argc, char *argv[])
             }
         }
     }
-}
-
-// Helper functions
-void freeMemory(char **words)
-{
-    if (words == NULL)
-        return; // Avoid double free
-    for (int i = 0; words[i] != NULL; i++)
-    {
-        free(words[i]);
-    }
-    free(words);
+    return 0;
 }
 
 void serialize_message(const struct message *msg, char *buffer, size_t buf_size)
@@ -386,13 +374,11 @@ struct message deserialize_message(const char *serialized)
         return msg;
     }
 
-    // Use a more robust parsing approach
     char type_str[20] = {0};
     char size_str[20] = {0};
     char source_buffer[MAX_NAME + 1] = {0};
     char *data_start = NULL;
 
-    // Find the first three colons to extract fields
     char *first_colon = strchr(serialized, ':');
     if (!first_colon)
     {
@@ -425,7 +411,6 @@ struct message deserialize_message(const char *serialized)
         msg.size = atoi(size_str);
     }
 
-    // Find and extract source
     char *third_colon = strchr(second_colon + 1, ':');
     if (!third_colon)
     {
@@ -440,7 +425,6 @@ struct message deserialize_message(const char *serialized)
         msg.source[source_len] = '\0';
     }
 
-    // Extract data (everything after the third colon)
     data_start = third_colon + 1;
     if (data_start && *data_start)
     {
@@ -515,7 +499,7 @@ struct session *session_check(const char *sessionID)
 
 void add_to_session(struct session *sess, struct client_info *client)
 {
-    // Insert at beginning of participants list.
+    // Insert at beginning of participants list
     client->next = sess->participants;
     sess->participants = client;
 }
@@ -536,7 +520,8 @@ void handle_join(struct message msg, int client_socket)
         join_return.size = sizeof("Session does not exist");
     }
     else
-    { // Send JN_ACK
+    {
+        // Send JN_ACK
         join_return.type = JN_ACK;
         strncpy((char *)join_return.data, checker->sessionID, MAX_DATA);
         join_return.data[MAX_DATA - 1] = '\0';
@@ -573,7 +558,7 @@ void handle_leave(struct message msg, int client_socket)
         }
         client = client->next;
     }
-    // Note: should we do error checking like if client not found, etc.
+
     struct session *curr_session = client->current_session;
     // Remove client from participants list
     struct client_info **curr = &(curr_session->participants);
@@ -666,7 +651,6 @@ void handle_query(struct message msg, int client_socket)
         cli = cli->next;
     }
 
-    // Add sessions (be careful with buffer limits)
     if (strlen(info) < MAX_DATA - 20)
     {
         strcat(info, "\nSessions: ");
@@ -764,7 +748,6 @@ int register_user(const char *username, const char *password)
         }
     }
 
-    // Append the new account.
     fprintf(filePosition, "%s %s\n", username, password);
     fclose(filePosition);
     return 0; // success
@@ -794,4 +777,74 @@ int verify_login(const char *username, const char *password)
     }
     fclose(fp);
     return -1;
+}
+
+void handle_private_message(struct message msg, int client_socket)
+{
+    printf("Got PM from socket %d: %s\n", client_socket, msg.data);
+
+    char targetID[MAX_NAME] = {0};
+    char pm_message[MAX_DATA] = {0};
+    char *backslash = strstr((char *)msg.data, "\\ "); // Find the separator "\ "
+    if (!backslash)
+    {
+        printf("Bad PM format: %s\n", msg.data);
+        struct message error = {MESSAGE, 0, "server", "Invalid PM format", 0};
+        error.size = strlen((char *)error.data);
+        char serialized[2048];
+        serialize_message(&error, serialized, sizeof(serialized));
+        send(client_socket, serialized, strlen(serialized), 0);
+        return;
+    }
+
+    int target_len = backslash - (char *)msg.data;
+    if (target_len >= MAX_NAME)
+        target_len = MAX_NAME - 1;
+    strncpy(targetID, (char *)msg.data, target_len);
+    targetID[target_len] = '\0';
+    strncpy(pm_message, backslash + 2, MAX_DATA - 1); // Skip "\ "
+    pm_message[MAX_DATA - 1] = '\0';
+
+    printf("Target: %s, Message: %s\n", targetID, pm_message);
+
+    struct client_info *sender = clients_head;
+    while (sender && sender->sockfd != client_socket)
+        sender = sender->next;
+    if (!sender)
+    {
+        printf("Sender not found\n");
+        return;
+    }
+
+    struct client_info *target = clients_head;
+    while (target)
+    {
+        if (strcmp(target->clientID, targetID) == 0 && target->sockfd != client_socket)
+        {
+            struct message pm = {PRIVATE_MESSAGE, 0, "", "", 0};
+            pm.type = PRIVATE_MESSAGE;
+            strncpy((char *)pm.source, sender->clientID, MAX_NAME);
+            pm.source[MAX_NAME - 1] = '\0';
+            strncpy((char *)pm.data, pm_message, MAX_DATA);
+            pm.data[MAX_DATA - 1] = '\0';
+            pm.size = strlen((char *)pm.data);
+
+            char serialized[2048];
+            serialize_message(&pm, serialized, sizeof(serialized));
+            printf("Sending to %s (sock %d): %s\n", target->clientID, target->sockfd, serialized);
+            if (send(target->sockfd, serialized, strlen(serialized), 0) < 0)
+            {
+                perror("Send failed");
+            }
+            return;
+        }
+        target = target->next;
+    }
+
+    printf("Target %s not found\n", targetID);
+    struct message error = {MESSAGE, 0, "server", "Target not found", 0};
+    error.size = strlen((char *)error.data);
+    char serialized[2048];
+    serialize_message(&error, serialized, sizeof(serialized));
+    send(client_socket, serialized, strlen(serialized), 0);
 }
